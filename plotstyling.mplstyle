@@ -1,0 +1,46 @@
+### FIGURE
+figure.facecolor: white
+figure.dpi: 40
+figure.titlesize: 38
+figure.figsize: 16.0, 16.0
+
+### LINES
+lines.linewidth: 3
+lines.markersize: 10
+
+### MARKERS
+scatter.marker: o         # The default marker type for scatter plots.
+scatter.edgecolors: none  # The default edge colors for scatter plots.
+
+### LEGEND
+legend.fontsize: 18
+
+### TICKS
+xtick.direction: out
+ytick.direction: out
+xtick.labelsize : 20
+ytick.labelsize : 20
+
+
+### FONTS
+text.usetex: True
+#text.latex.unicode: True
+#font.family: xyzxyz
+#font.serif: abcabc # Comment this out
+
+font.family: serif
+font.serif: computer modern roman
+#font.size: 20
+
+### AXES
+axes.grid: False
+axes.facecolor: white
+axes.linewidth: 1.0
+axes.titlesize: 20
+axes.labelsize: 20
+axes.spines.top: True
+axes.spines.right: True
+# lighter colours
+#axes.prop_cycle: cycler('color', ['66c2a5','fc8d62','8da0cb','e78ac3','a6d854'])
+# darker colours
+axes.prop_cycle: cycler('color', ['1b9e77','d95f02','7570b3','e7298a','66a61e','e6ab02'])

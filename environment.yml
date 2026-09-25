@@ -1,0 +1,13 @@
+name: aws_arctic
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - numpy
+  - xarray
+  - netcdf4
+  - matplotlib
+  - cartopy
+  - cmocean
+  - cmcrameri
+  - ipykernel
