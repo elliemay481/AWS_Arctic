@@ -59,7 +59,7 @@ import cmocean as cmc
 import cmcrameri as cmcr
 
 
-plt.style.use("../plotstyling.mplstyle")
+plt.style.use("../../plotstyling.mplstyle")
 
 VAR_LAT = "latitude"
 VAR_LON = "longitude"
@@ -100,7 +100,7 @@ CHANNEL_PAIRS = [
     ("AWS36", "AWS41"),
 ]
 
-TB_VMIN, TB_VMAX = 100.0, 270.0
+TB_VMIN, TB_VMAX = 200.0, 280.0
 
 
 def channel_pair(name):
@@ -211,7 +211,7 @@ def parse_args():
                    help="folder holding the L2 files")
     p.add_argument("--pattern", default="l2_arctic_*.nc",
                    help="glob pattern, relative to data-dir")
-    p.add_argument("--fig-dir", default="../../figures",
+    p.add_argument("--fig-dir", default="../../figures/swath_examples",
                    help="where to write the maps")
     p.add_argument("--variables", choices=sorted(VARIABLE_SETS),
                    default="fwp_lwp",
@@ -255,7 +255,7 @@ def build_panels(ds, args):
         return [
             (ds[VAR_TB].sel({CHANNEL_DIM: name}).values,
              f"{name} $T_{{a}}$ (K)",
-             Normalize(vmin=120, vmax=270),
+             Normalize(vmin=TB_VMIN, vmax=TB_VMAX),
              cmcr.cm.lajolla)
             for name in pair
         ]
@@ -311,6 +311,8 @@ def plot_granule(ds, title, out_path, args):
         ax.add_feature(cfeature.LAND, facecolor="dimgrey", zorder=0)
         ax.add_feature(cfeature.BORDERS, edgecolor="white", linewidth=0.5, zorder=1)
         ax.coastlines(color="white", linewidth=1, zorder=100)
+
+        #print(np.nanmin(values))
 
         sc = ax.scatter(
             lon, lat, c=values, s=args.marker_size,
