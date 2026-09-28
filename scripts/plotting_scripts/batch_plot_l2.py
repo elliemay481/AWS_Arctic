@@ -25,20 +25,17 @@ Example
 -------
 python batch_plot_l2.py \
     --data-dir /scratch/may/aws/L2_arctic/2025/12 \
-    --fig-dir ../figures \
     --variables fwp_lwp \
     --statistic relative_cdf_width
     --pattern *20260605*.nc
 
 python batch_plot_l2.py \
     --data-dir /scratch/may/aws/L2_arctic/2025/12 \
-    --fig-dir ../figures \
     --variables zm_dm \
     --statistic median
 
 python batch_plot_l2.py \
     --data-dir /scratch/may/aws/L2_arctic/2025/12 \
-    --fig-dir ../figures \
     --channel AWS33
 """
 
@@ -214,7 +211,7 @@ def parse_args():
                    help="folder holding the L2 files")
     p.add_argument("--pattern", default="l2_arctic_*.nc",
                    help="glob pattern, relative to data-dir")
-    p.add_argument("--fig-dir", default="../figures_for_me",
+    p.add_argument("--fig-dir", default="../../figures",
                    help="where to write the maps")
     p.add_argument("--variables", choices=sorted(VARIABLE_SETS),
                    default="fwp_lwp",
