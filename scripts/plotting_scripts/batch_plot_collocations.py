@@ -263,10 +263,12 @@ def plot_collocation(ds, col, title, out_path, args):
 
     # ---- EarthCARE IWC ----
     ax = ax_iwc
-    pm = ax.pcolormesh(x_2d, col["ea_height"][sel] / 1e3, wc,
+    # transposed so height runs along the rows and time along the columns,
+    # which is the layout pcolormesh expects when it works out the cell edges
+    pm = ax.pcolormesh(x_2d.T, col["ea_height"][sel].T / 1e3, wc.T,
                        shading="nearest", norm=LogNorm(vmin=v["wc_vmin"], vmax=v["wc_vmax"]),
                        cmap=v["cmap"])
-    ax.set_ylim(0, 10)
+    ax.set_ylim(0, 15)
     ax.set_xlabel("AWS scan time")
     ax.set_ylabel("Height [km]")
     ax.set_title(f"EarthCARE {v['wc_name']} (nearest profile)")
@@ -310,23 +312,24 @@ def main():
 
         print(f"[{i}/{len(pairs)}] {stem}", flush=True)
         try:
-            ds = xr.open_dataset(aws_path)
-            missing = [name for name in (VAR_LAT, VAR_LON, v["aws_var"]) if name not in ds]
-            if missing:
-                print(f"    missing variables {missing}, skipping")
-                continue
+            # "with" closes the file again once the figure is saved
+            with xr.open_dataset(aws_path) as ds:
+                missing = [name for name in (VAR_LAT, VAR_LON, v["aws_var"]) if name not in ds]
+                if missing:
+                    print(f"    missing variables {missing}, skipping")
+                    continue
 
-            col = utils.colocate_pair_nearest_profile(aws_path, ea_path,
-                                                      max_dist_km=args.max_dist_km)
-            missing = [key for key in (v["aws"], v["ea"], v["wc"]) if key not in col]
-            if missing:
-                print(f"    colocate_pair_nearest_profile does not return {missing}, skipping")
-                continue
-            if col["scan"].size == 0:
-                print(f"    no AWS pixels within {args.max_dist_km} km of EarthCARE, skipping")
-                continue
+                col = utils.colocate_pair_nearest_profile(aws_path, ea_path,
+                                                          max_dist_km=args.max_dist_km)
+                missing = [key for key in (v["aws"], v["ea"], v["wc"]) if key not in col]
+                if missing:
+                    print(f"    colocate_pair_nearest_profile does not return {missing}, skipping")
+                    continue
+                if col["scan"].size == 0:
+                    print(f"    no AWS pixels within {args.max_dist_km} km of EarthCARE, skipping")
+                    continue
 
-            plot_collocation(ds, col, format_datetime_range(stem), fig_path, args)
+                plot_collocation(ds, col, format_datetime_range(stem), fig_path, args)
         except Exception as err:      # one bad file should not stop the run
             print(f"    failed: {type(err).__name__}: {err}")
             continue
