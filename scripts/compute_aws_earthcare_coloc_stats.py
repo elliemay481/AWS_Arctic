@@ -8,8 +8,10 @@ Mirrors the calling of find_collocations.py, i.e. calling with the argument 2025
 loads the list of collocations created by calling 'python find_collocations.py 2025-07'
 
 To use:
-python compute_aws_earthcare_coloc_stats.py 2025-07              # one month
-python compute_aws_earthcare_coloc_stats.py 2025-12 2026-02      # range, both months included
+python compute_aws_earthcare_coloc_stats.py 2025-07                    # one month
+python compute_aws_earthcare_coloc_stats.py 2025-12:2026-02            # range, both months included
+python compute_aws_earthcare_coloc_stats.py 2025-07 2025-08 2026-06    # separate months
+python compute_aws_earthcare_coloc_stats.py 2025-07:2025-08 2026-06    # ranges and months mixed
 """
 
 import argparse
@@ -41,15 +43,32 @@ data_dir = Path("/home/maye/AWS_Arctic/data")
 # ============================================================
 # COLLOCATION PAIRS
 # ============================================================
-p = argparse.ArgumentParser()
-p.add_argument("start", help="first month, YYYY-MM")
-p.add_argument("end", nargs="?", help="last month, YYYY-MM (default: same as start)")
-args = p.parse_args()
+def parse_months():
+    """The months to process, and a name for them to use in file names.
 
-months = pd.period_range(args.start, args.end or args.start, freq="M")
-if len(months) == 0:
-    p.error("the end month is before the start month")
-span = f"{months[0]}" if len(months) == 1 else f"{months[0]}_to_{months[-1]}"
+    Same as in find_collocations.py, so the same arguments give the same file name.
+    """
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("months", nargs="+",
+                   help="months as YYYY-MM, or ranges as YYYY-MM:YYYY-MM (both included)")
+    args = p.parse_args()
+
+    months, names = [], []
+    for item in args.months:
+        start, _, end = item.partition(":")
+        try:
+            rng = pd.period_range(start, end or start, freq="M")
+        except ValueError as err:
+            p.error(f"could not read {item}: {err}")
+        if len(rng) == 0:
+            p.error(f"{item}: the end month is before the start month")
+        months.extend(rng)
+        names.append(f"{rng[0]}" if len(rng) == 1 else f"{rng[0]}_to_{rng[-1]}")
+    return sorted(set(months)), "_".join(names)
+
+
+months, span = parse_months()
 
 pairs_file = data_dir / f"earthcare_aws_file_pairs_{span}.pkl"
 out_file = data_dir / f"aws_earthcare_histograms_{span}.pkl"

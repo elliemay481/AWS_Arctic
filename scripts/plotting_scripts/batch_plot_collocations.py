@@ -61,14 +61,14 @@ VAR_LON = "longitude"
 VARIABLES = {
     "fwp": {
         "aws_var": "fwp_mean",
-        "aws": "aws_fwp", "aws_q16": "aws_fwp_q16", "aws_q84": "aws_fwp_q84",
+        "aws": "aws_fwp", "aws_q1": "aws_fwp_q1", "aws_q16": "aws_fwp_q16", "aws_q84": "aws_fwp_q84", "aws_q99": "aws_fwp_q99",
         "ea": "ea_iwp", "wc": "ea_iwc",
         "name": "FWP", "map_name": "Fwp", "wc_name": "IWC",
         "cmap": cmc.cm.ice, "wc_vmin": 1e-6, "wc_vmax": 1e-3,
     },
     "lwp": {
         "aws_var": "lwp_mean",
-        "aws": "aws_lwp", "aws_q16": "aws_lwp_q16", "aws_q84": "aws_lwp_q84",
+        "aws": "aws_lwp", "aws_q1": "aws_lwp_q1", "aws_q16": "aws_lwp_q16", "aws_q84": "aws_lwp_q84", "aws_q99": "aws_lwp_q99",
         "ea": "ea_lwp", "wc": "ea_lwc",
         "name": "LWP", "map_name": "Lwp", "wc_name": "LWC",
         "cmap": cmc.cm.matter_r, "wc_vmin": 1e-6, "wc_vmax": 1e-3,
@@ -222,7 +222,7 @@ def plot_collocation(ds, col, title, out_path, args):
     ax_map.add_feature(cfeature.OCEAN, facecolor="lightgrey", zorder=0)
     ax_map.add_feature(cfeature.LAND, facecolor="dimgrey", zorder=0)
     ax_map.add_feature(cfeature.BORDERS, edgecolor="white", linewidth=0.5, zorder=1)
-    ax_map.coastlines(color="white", linewidth=1, zorder=100)
+    ax_map.coastlines(color="white", linewidth=0.8, zorder=10)
 
     sc = ax_map.scatter(
         lon, lat, c=aws_map, s=args.marker_size,
@@ -237,6 +237,20 @@ def plot_collocation(ds, col, title, out_path, args):
     ax_map.set_title(f"AWS {v['name']} swath with collocated EarthCARE track")
     fig.colorbar(sc, cax=cax_map, orientation="horizontal", extend="both",
                  label=rf"Retrieved {v['map_name']} (kg/m$^{{2}}$)")
+
+    # label the ends of the track, matching the first and last times in the line plots
+    track_lon = col["lon"][sel]
+    track_lat = col["lat"][sel]
+    geo = ccrs.PlateCarree()._as_mpl_transform(ax_map)
+    for i, text, offset in [(0, "Start", (8, -8)), (-1, "End", (-8, 8))]:
+        #ax_map.plot(track_lon[i], track_lat[i], marker="o", ms=6, color="black",
+                    #transform=ccrs.PlateCarree(), zorder=4)
+        ax_map.annotate(text, xy=(track_lon[i], track_lat[i]), xycoords=geo,
+                        xytext=offset, textcoords="offset points",
+                        ha="right" if offset[0] < 0 else "left",
+                        fontsize=14, fontweight="bold", color="red", zorder=11,
+                        )
+                        #bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.8))
 
     # ---- FWP and IWP along the track ----
     ax = ax_fwp
@@ -271,11 +285,13 @@ def plot_collocation(ds, col, title, out_path, args):
     ax.tick_params(labelbottom=False)
     """
     # ---- cdf width ----
+    q1 = col[v["aws_q1"]][sel]
+    q99 = col[v["aws_q99"]][sel]
     ax = ax_cdf
-    ax.fill_between(x, 0, (q84-q16)/aws, color="C0", alpha=0.2, lw=0, label="AWS Unc.")
+    ax.fill_between(x, 0, (q99-q1)/aws, color="C0", alpha=0.2, lw=0, label="AWS Unc.")
     
     #ax.plot(x, ea, color="C1", ls=":", label="EarthCARE", lw=2)
-    ax.set_ylabel(r"(Q84 - Q16)/Mean")
+    ax.set_ylabel(r"(Q99 - Q1)/Mean")
     ax.legend()
     style_time_axis(ax)
     ax.tick_params(labelbottom=False)
