@@ -1,8 +1,25 @@
 import numpy as np
 import xarray as xr
 import pickle
+import pandas as pd
+
 
 KM_PER_DEG = 111.2
+
+
+def calendar_months(date_str):
+    """Calendar months (1-12) in a name like '2025-12_to_2026-02' or '2025-07_2025-08_2026-06'."""
+    tokens = date_str.split("_")
+    periods = []
+    i = 0
+    while i < len(tokens):
+        if i + 2 < len(tokens) and tokens[i + 1] == "to":      # a range
+            periods.extend(pd.period_range(tokens[i], tokens[i + 2], freq="M"))
+            i += 3
+        else:                                                  # a single month
+            periods.append(pd.Period(tokens[i], freq="M"))
+            i += 1
+    return sorted({p.month for p in periods})
 
 
 def load_file_pairs(path):

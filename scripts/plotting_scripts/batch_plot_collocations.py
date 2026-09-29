@@ -288,7 +288,10 @@ def plot_collocation(ds, col, title, out_path, args):
     q1 = col[v["aws_q1"]][sel]
     q99 = col[v["aws_q99"]][sel]
     ax = ax_cdf
-    ax.fill_between(x, 0, (q99-q1)/aws, color="C0", alpha=0.2, lw=0, label="AWS Unc.")
+    with np.errstate(divide="ignore", invalid="ignore"):
+        width = (q99 - q1) / aws
+        ax.fill_between(x, 0, width, where=aws > 1e-3,
+                    color="C0", alpha=0.2, lw=0, label="AWS Unc.")
     
     #ax.plot(x, ea, color="C1", ls=":", label="EarthCARE", lw=2)
     ax.set_ylabel(r"(Q99 - Q1)/Mean")

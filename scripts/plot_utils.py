@@ -6,6 +6,8 @@ import matplotlib.patches as patches
 
 #import scripts.analysis_functions as analysis
 
+
+
 def plot_overall_distribution(retrieval_dict, variable, ax, bins, dardar_filepath=None, factor=1):
 
     bins_centre = bins[:-1] + np.diff(bins) / 2
@@ -391,6 +393,84 @@ def plot_conditional_probability_2vars(x, y, bins, ax, vmin=1e-5, vmax=3e-3):
     return y_given_x
 
 
+def conditional_probability_from_counts(counts_xy, bins_x, bins_y, bin_centres, log=False):
+    """
+    Conditional probability density p(y|x) from 2D counts.
+
+    Input
+    -----
+    counts_xy : 2D array, rows = x bins, columns = y bins (e.g. from np.histogram2d(x, y))
+    bins_x    : bin edges for x
+    bins_y    : bin edges for y
+    log       : if True, the density is per log10 unit of y instead of per linear unit
+
+    Steps
+    -----
+    1. bin widths:          dx, dy
+    2. joint density:       p(x,y) = counts / (N * dx * dy)
+    3. marginal density:    p(x)   = sum over y of p(x,y) * dy
+    4. conditional density: p(y|x) = p(x,y) / p(x)
+
+    For each x bin, p(y|x) integrates to 1 over y: sum over y of p(y|x) * dy = 1.
+
+    Returns
+    -------
+    y_given_x : p(y|x), rows = y, columns = x (ready for plotting)
+    counts_x  : number of pairs in each x bin
+    """
+    counts_xy = np.asarray(counts_xy, dtype=float)
+
+    # ------------------------------------------------------------
+    # 1. bin widths
+    # ------------------------------------------------------------
+    # x widths are only needed for the joint density; they cancel in the end
+    dx = np.diff(bins_x)
+
+    if log:
+        # widths in log10(y). If the first edge is 0, log10(0) = -inf and the
+        # first width would be infinite, so give that bin the width of the next one
+        with np.errstate(divide="ignore"):
+            log_edges = np.log10(bins_y)
+        dy = np.diff(log_edges)
+        dy[0] = dy[1]
+    else:
+        dy = np.diff(bins_y)
+
+    # ------------------------------------------------------------
+    # 2. joint density p(x,y)
+    # ------------------------------------------------------------
+    n_total = counts_xy.sum()
+    bin_area = dx[:, None] * dy[None, :]            # shape (n_x, n_y)
+    p_xy = counts_xy / (n_total * bin_area)
+
+    # ------------------------------------------------------------
+    # 3. marginal density p(x)
+    # ------------------------------------------------------------
+    # integrate the joint density over y: sum over the columns, weighted by dy
+    p_x = (p_xy * dy[None, :]).sum(axis=1)          # shape (n_x,)
+
+    # ------------------------------------------------------------
+    # 4. conditional density p(y|x)
+    # ------------------------------------------------------------
+    # divide each row (one x bin) by its marginal.
+    with np.errstate(invalid="ignore", divide="ignore"):
+        p_y_given_x = p_xy / p_x[:, None]           # shape (n_x, n_y)
+
+    # number of pairs in each x bin, e.g. to blank bins with too few pairs
+    counts_x = counts_xy.sum(axis=1)
+
+    # optional check: each x bin with data should integrate to 1 over y
+    integral = (p_y_given_x * dy[None, :]).sum(axis=1)
+    print(np.allclose(integral[counts_x > 0], 1))
+
+    # ------------------------------------------------------------
+    # 5. conditional mean E(y|x) = integral y p(y|x) dy
+    # ------------------------------------------------------------
+    conditional_mean = ((bin_centres*p_y_given_x) * dy[None, :]).sum(axis=1)
+
+    # rows = y, columns = x, pcolormesh and contourf expect this
+    return p_y_given_x.T, counts_x, conditional_mean
+    
 
 
 """
