@@ -6,8 +6,10 @@ and saves a list of unique (aws_l2_arctic_file, earthcare_file) pairs.
 Requires aws_processing repo to run.
 
 To use:
-pixi run python ../AWS_Arctic/scripts/find_collocations.py 2025-07              # one month
-pixi run python ../AWS_Arctic/scripts/find_collocations.py 2025-12 2026-02      # range, both months included
+pixi run python ../AWS_Arctic/scripts/find_collocations.py 2025-07                    # one month
+pixi run python ../AWS_Arctic/scripts/find_collocations.py 2025-12:2026-02            # range, both months included
+pixi run python ../AWS_Arctic/scripts/find_collocations.py 2025-07 2025-08 2026-06    # separate months
+pixi run python ../AWS_Arctic/scripts/find_collocations.py 2025-07:2025-08 2026-06    # ranges and months mixed
 """
 
 import argparse
@@ -40,19 +42,25 @@ MONTH_NAMES = {
 
 
 def parse_months():
+    """The months to process, and a name for them to use in file names."""
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("start", help="first month, YYYY-MM")
-    p.add_argument("end", nargs="?", help="last month, YYYY-MM (default: same as start)")
+    p.add_argument("months", nargs="+",
+                   help="months as YYYY-MM, or ranges as YYYY-MM:YYYY-MM (both included)")
     args = p.parse_args()
 
-    try:
-        months = pd.period_range(args.start, args.end or args.start, freq="M")
-    except ValueError as err:
-        p.error(f"could not read the months: {err}")
-    if len(months) == 0:
-        p.error("the end month is before the start month")
-    return months
+    months, names = [], []
+    for item in args.months:
+        start, _, end = item.partition(":")
+        try:
+            rng = pd.period_range(start, end or start, freq="M")
+        except ValueError as err:
+            p.error(f"could not read {item}: {err}")
+        if len(rng) == 0:
+            p.error(f"{item}: the end month is before the start month")
+        months.extend(rng)
+        names.append(f"{rng[0]}" if len(rng) == 1 else f"{rng[0]}_to_{rng[-1]}")
+    return sorted(set(months)), "_".join(names)
 
 
 def find_csv_files(year, month):
@@ -71,11 +79,11 @@ def find_csv_files(year, month):
 def index_aws_files(months):
     """(start, end, path) for every AWS file in the given months.
 
-    The month before is included too, since a file that starts at the end
-    of one month can cover collocations early in the next month.
+    The month before each month is included too, since a file that starts at
+    the end of one month can cover collocations early in the next month.
     """
     index = []
-    for period in [months[0] - 1, *months]:
+    for period in sorted(set(months) | {m - 1 for m in months}):
         folder = AWS_ROOT / f"{period.year:04d}" / f"{period.month:02d}"
         for f in sorted(folder.rglob("l2_arctic_*_v2.nc")):
             try:
@@ -156,20 +164,9 @@ def process_month(period, aws_index):
 
 
 def main():
-
-    from collections import Counter
-    
-    year, month = 2026, 3
-    counts = Counter()
-    for f in find_csv_files(year, month):
-        counts.update(set(read_times(f, year, month)))
-    
-    repeated = sum(1 for n in counts.values() if n > 1)
-    print(f"{len(counts)} unique times, {repeated} appear in more than one file")
-    
-    months = parse_months()
+    months, span = parse_months()
     aws_index = index_aws_files(months)
-    print(f"Processing {len(months)} months, {months[0]} to {months[-1]}, "
+    print(f"Processing {len(months)} months: {', '.join(str(m) for m in months)}, "
           f"{len(aws_index)} AWS files indexed")
 
     pairs = []
@@ -179,7 +176,6 @@ def main():
     # many collocations share the same two files; keep each pair once, in order
     pairs = list(dict.fromkeys(pairs))
 
-    span = f"{months[0]}" if len(months) == 1 else f"{months[0]}_to_{months[-1]}"
     output_file = OUTPUT_DIR / f"earthcare_aws_file_pairs_{span}.pkl"
     with open(output_file, "wb") as f:
         pickle.dump(pairs, f, protocol=pickle.HIGHEST_PROTOCOL)

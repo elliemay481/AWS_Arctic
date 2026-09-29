@@ -17,10 +17,13 @@ def load_aws(aws_filepath, start=0, end=400):
         aws = {
             "lon": lon_da.values.ravel(),
             "lat": ds.latitude[start:end, :].values.ravel(),
-            "fwp": ds.fwp_mean[start:end, :].values.ravel(),
-            "lwp": ds.lwp_mean[start:end, :].values.ravel(),
             "scan": scan_2d.values.ravel(),
         }
+        for var in ("fwp", "lwp"):
+            aws[var] = ds[f"{var}_mean"][start:end, :].values.ravel()
+            quantiles = ds[f"{var}_quantiles"][start:end, :]
+            for q in (16, 84):
+                aws[f"{var}_q{q}"] = quantiles.sel(quantile=q / 100, method="nearest").values.ravel()
     return aws
 
 
@@ -65,6 +68,7 @@ def colocate_nearest_profile(aws, ea, max_dist_km=5.0):
 
     out = {"lat": [], "lon": [], "scan": [], "aws_fwp": [], "ea_iwp": [],
            "ea_iwc": [], "aws_lwp": [], "ea_lwp": [], "ea_lwc": [],
+           "aws_fwp_q16": [], "aws_fwp_q84": [], "aws_lwp_q16": [], "aws_lwp_q84": [],
            "ea_height": [], "dist_km": []}
 
     if ea_idx.size > 0:
@@ -103,6 +107,8 @@ def colocate_nearest_profile(aws, ea, max_dist_km=5.0):
             out["ea_lwc"].append(ea["lwc"][p])
             out["ea_height"].append(ea["height"][p])
             out["dist_km"].append(d[i])
+            for key in ("fwp_q16", "fwp_q84", "lwp_q16", "lwp_q84"):
+                out[f"aws_{key}"].append(aws[key][j])
 
     return {key: np.asarray(val) for key, val in out.items()}
 

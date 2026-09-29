@@ -16,11 +16,11 @@ Example
 -------
 python batch_plot_collocations.py \
     --data-dir /scratch/may/aws/L2_arctic/2025/12 \
-    --pairs-file ../data/earthcare_aws_file_pairs_2025-12_to_2026-02.pkl
+    --pairs-file ../../data/earthcare_aws_file_pairs_2025-12_to_2026-02.pkl
 
 python batch_plot_collocations.py \
     --data-dir /scratch/may/aws/L2_arctic/2025/12 \
-    --pairs-file ../data/earthcare_aws_file_pairs_2025-12_to_2026-02.pkl \
+    --pairs-file ../../data/earthcare_aws_file_pairs_2025-12_to_2026-02.pkl \
     --pattern *20251205*.nc \
     --variable lwp
 """
@@ -61,13 +61,15 @@ VAR_LON = "longitude"
 VARIABLES = {
     "fwp": {
         "aws_var": "fwp_mean",
-        "aws": "aws_fwp", "ea": "ea_iwp", "wc": "ea_iwc",
+        "aws": "aws_fwp", "aws_q16": "aws_fwp_q16", "aws_q84": "aws_fwp_q84",
+        "ea": "ea_iwp", "wc": "ea_iwc",
         "name": "FWP", "map_name": "Fwp", "wc_name": "IWC",
         "cmap": cmc.cm.ice, "wc_vmin": 1e-6, "wc_vmax": 1e-3,
     },
     "lwp": {
         "aws_var": "lwp_mean",
-        "aws": "aws_lwp", "ea": "ea_lwp", "wc": "ea_lwc",
+        "aws": "aws_lwp", "aws_q16": "aws_lwp_q16", "aws_q84": "aws_lwp_q84",
+        "ea": "ea_lwp", "wc": "ea_lwc",
         "name": "LWP", "map_name": "Lwp", "wc_name": "LWC",
         "cmap": cmc.cm.matter_r, "wc_vmin": 1e-6, "wc_vmax": 1e-3,
     },
@@ -184,6 +186,7 @@ def style_time_axis(ax):
 
 
 def plot_collocation(ds, col, title, out_path, args):
+
     """Map in the left column, collocation panels in the right column."""
     v = VARIABLES[args.variable]
     vmin = getattr(args, f"{args.variable}_vmin")
@@ -213,7 +216,7 @@ def plot_collocation(ds, col, title, out_path, args):
         ax_map.set_extent([-180, 180, args.lat_min, 90], crs=ccrs.PlateCarree())
     map_aspect = np.ptp(ax_map.get_xlim()) / np.ptp(ax_map.get_ylim())
 
-    (ax_fwp, ax_diff, ax_iwc), cax_map, cax_iwc = layout_axes(fig, ax_map, map_aspect)
+    (ax_fwp, ax_cdf, ax_iwc), cax_map, cax_iwc = layout_axes(fig, ax_map, map_aspect)
 
     # ---- map ----
     ax_map.add_feature(cfeature.OCEAN, facecolor="lightgrey", zorder=0)
@@ -237,10 +240,15 @@ def plot_collocation(ds, col, title, out_path, args):
 
     # ---- FWP and IWP along the track ----
     ax = ax_fwp
-    ax.plot(x, aws, color="black", label="AWS", lw=2)
+
+    q16 = col[v["aws_q16"]][sel]
+    q84 = col[v["aws_q84"]][sel]
+    ax.fill_between(x, q16, q84, color="C0", alpha=0.2, lw=0, label="AWS Q16:Q84")
+    ax.plot(x, aws, color="C0", label="AWS", lw=2)
     ax.plot(x, ea, color="C1", label="EarthCARE", lw=2)
     ax.set_yscale("log")
-    ax.set_ylim([1e-3, 1e2])
+    ax.set_ylim([1e-2, 1e2])
+    ax.axhspan(1e-2, 2e-1, color="grey", alpha=0.2)
     ax.set_ylabel(rf"{v['name']} [kg m$^{{-2}}$]")
     #ax.set_title(f"Collocation: {coloc_date} UTC")
     ax.legend()
@@ -248,6 +256,7 @@ def plot_collocation(ds, col, title, out_path, args):
     ax.tick_params(labelbottom=False)
 
     # ---- relative difference ----
+    """
     ax = ax_diff
     with np.errstate(divide="ignore", invalid="ignore"):
         diff_ea = 100 * (aws - ea) / ea
@@ -260,11 +269,19 @@ def plot_collocation(ds, col, title, out_path, args):
     ax.legend()
     style_time_axis(ax)
     ax.tick_params(labelbottom=False)
+    """
+    # ---- cdf width ----
+    ax = ax_cdf
+    ax.fill_between(x, 0, (q84-q16)/aws, color="C0", alpha=0.2, lw=0, label="AWS Unc.")
+    
+    #ax.plot(x, ea, color="C1", ls=":", label="EarthCARE", lw=2)
+    ax.set_ylabel(r"(Q84 - Q16)/Mean")
+    ax.legend()
+    style_time_axis(ax)
+    ax.tick_params(labelbottom=False)
 
     # ---- EarthCARE IWC ----
     ax = ax_iwc
-    # transposed so height runs along the rows and time along the columns,
-    # which is the layout pcolormesh expects when it works out the cell edges
     pm = ax.pcolormesh(x_2d.T, col["ea_height"][sel].T / 1e3, wc.T,
                        shading="nearest", norm=LogNorm(vmin=v["wc_vmin"], vmax=v["wc_vmax"]),
                        cmap=v["cmap"])
