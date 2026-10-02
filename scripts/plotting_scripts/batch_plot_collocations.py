@@ -65,6 +65,7 @@ VARIABLES = {
         "aws_var": "fwp_mean",
         "aws": "aws_fwp", "aws_q1": "aws_fwp_q1", "aws_q16": "aws_fwp_q16", "aws_q84": "aws_fwp_q84", "aws_q99": "aws_fwp_q99",
         "ea": "ea_iwp", "wc": "ea_iwc",
+        "flags": ["median_distance_to_ea", "mean_distance_to_ea", "n_ea_profiles"],
         "aws_zm": "aws_zm", "ea_zm": "ea_zm",
         "name": "FWP", "map_name": "Fwp", "wc_name": "IWC",
         "cmap": cmc.cm.ice, "wc_vmin": 1e-6, "wc_vmax": 1e-3,
@@ -117,7 +118,7 @@ def parse_args():
                    help="glob pattern, relative to data-dir")
     p.add_argument("--fig-dir", default="../../figures/earthcare_collocation_examples",
                    help="where to write the figures")
-    p.add_argument("--max-dist-km", type=float, default=5.0,
+    p.add_argument("--max-dist-km", type=float, default=15.0,
                    help="largest AWS pixel to EarthCARE profile distance")
     p.add_argument("--lat-min", type=float, default=60.0,
                    help="southern edge of the map")
@@ -200,7 +201,7 @@ def plot_collocation(ds, col, title, out_path, args):
     lon = ds[VAR_LON].values
     aws_map = ds[v["aws_var"]].values
 
-    sel = nearest_per_scan(col)
+    sel = np.argsort(col["scan"], kind="stable")   # all points, in time order
     aws = col[v["aws"]][sel]
     ea = col[v["ea"]][sel]
     wc = col[v["wc"]][sel]
@@ -302,6 +303,25 @@ def plot_collocation(ds, col, title, out_path, args):
     ax.legend(fontsize=12)
     style_time_axis(ax)
     ax.tick_params(labelbottom=False)
+    
+    # ---- collocation quality flags, on a second y-axis ----
+    flag_labels = {
+        "median_distance_to_ea": "Median distance to EC [km]",
+        "mean_distance_to_ea": "Mean distance to EC [km]",
+        "n_ea_profiles": "Number of EC profiles",
+    }
+    ax_flags = ax.twinx()
+    for n, flag in enumerate(v.get("flags", [])[:2]):
+        ax_flags.plot(x, col[flag][sel], color=f"C{n + 2}", lw=1.5,
+                      label=flag_labels.get(flag, flag))
+    ax_flags.set_ylabel("Flags [km, count]")
+    ax_flags.set_ylim(bottom=0)
+    ax_flags.tick_params(labelbottom=False)
+
+    # one legend for both axes
+    handles, labels = ax.get_legend_handles_labels()
+    flag_handles, flag_labels_used = ax_flags.get_legend_handles_labels()
+    ax.legend(handles + flag_handles, labels + flag_labels_used, fontsize=10, loc="upper left")
 
     # ---- EarthCARE IWC ----
     ax = ax_iwc

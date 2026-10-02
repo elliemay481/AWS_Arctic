@@ -206,15 +206,15 @@ def colocate_nearest_profile(aws, ea, max_dist_km=15.0, avg_dist_km=15.0):
 
             distance_earthcare_from_aws_sample = d[k]    # as the row d[k] contains distance to all earthcare points
             # select earthcare cases with distance is less than specified amount
-            ea_samples = np.flatnonzero(
-                ea_ok & (distance_earthcare_from_aws_sample <= avg_dist_km)
-            )
+            within = distance_earthcare_from_aws_sample <= avg_dist_km
+            ea_samples = ea_ok[within]                                   # indices in the full EarthCARE arrays
+            sample_dist = distance_earthcare_from_aws_sample[within]     # their distances [km]
             
             if ea_samples.size == 0:
                 continue
 
             # save closest earthcare profile
-            closest_ea_idx = ea_samples[np.argmin(d[k, ea_samples])]
+            closest_ea_idx = ea_samples[np.argmin(sample_dist)]
             out["ea_iwc"].append(ea["iwc"][closest_ea_idx])
             out["ea_lwc"].append(ea["lwc"][closest_ea_idx])
             out["ea_height"].append(ea["height"][closest_ea_idx])
@@ -231,8 +231,8 @@ def colocate_nearest_profile(aws, ea, max_dist_km=15.0, avg_dist_km=15.0):
 
             # as a form of quality flag
             out["n_ea_profiles"].append(ea_samples.size)
-            median_distance = np.median(distance_earthcare_from_aws_sample[ea_samples])
-            mean_distance = np.mean(distance_earthcare_from_aws_sample[ea_samples])
+            median_distance = np.median(sample_dist)
+            mean_distance = np.mean(sample_dist)
             out["median_distance_to_ea"].append(median_distance)
             out["mean_distance_to_ea"].append(mean_distance)
 
