@@ -7,7 +7,8 @@ pair in --pairs-file whose AWS file is in --data-dir gets one figure:
     left column     map of the AWS FWP (or LWP) swath, with the EarthCARE track shown
     right column    AWS FWP and EarthCARE IWP along the track (or AWS LWP
                     and EarthCARE LWP), their relative difference, and the
-                    EarthCARE IWC (or LWC) profiles
+                    EarthCARE IWC (or LWC) profiles, with the AWS and
+                    EarthCARE mean mass height (Zm) on top for FWP
 
 To plot for a single day, the --pattern argument can be used with,
 e.g. *20251205*.nc
@@ -58,11 +59,13 @@ VAR_LON = "longitude"
 # what is read and how it is labelled, for each --variable
 #   aws_var       variable in the AWS L2 file, for the map
 #   aws, ea, wc   keys returned by utils.colocate_pair_nearest_profile
+#   aws_zm, ea_zm mean mass heights [m] drawn on the profile panel (None: not drawn)
 VARIABLES = {
     "fwp": {
         "aws_var": "fwp_mean",
         "aws": "aws_fwp", "aws_q1": "aws_fwp_q1", "aws_q16": "aws_fwp_q16", "aws_q84": "aws_fwp_q84", "aws_q99": "aws_fwp_q99",
         "ea": "ea_iwp", "wc": "ea_iwc",
+        "aws_zm": "aws_zm", "ea_zm": "ea_zm",
         "name": "FWP", "map_name": "Fwp", "wc_name": "IWC",
         "cmap": cmc.cm.ice, "wc_vmin": 1e-6, "wc_vmax": 1e-3,
     },
@@ -70,6 +73,7 @@ VARIABLES = {
         "aws_var": "lwp_mean",
         "aws": "aws_lwp", "aws_q1": "aws_lwp_q1", "aws_q16": "aws_lwp_q16", "aws_q84": "aws_lwp_q84", "aws_q99": "aws_lwp_q99",
         "ea": "ea_lwp", "wc": "ea_lwc",
+        "aws_zm": None, "ea_zm": None,
         "name": "LWP", "map_name": "Lwp", "wc_name": "LWC",
         "cmap": cmc.cm.matter_r, "wc_vmin": 1e-6, "wc_vmax": 1e-3,
     },
@@ -233,7 +237,7 @@ def plot_collocation(ds, col, title, out_path, args):
     ax_map.scatter(col["lon"][sel], col["lat"][sel], c="red", s=15, ec="none",
                    transform=ccrs.PlateCarree(), zorder=3, label="EarthCARE")
     ax_map.gridlines(draw_labels=False, linewidth=0.3)
-    ax_map.legend(loc="lower left")
+    ax_map.legend(loc="lower left", fontsize=12)
     ax_map.set_title(f"AWS {v['name']} swath with collocated EarthCARE track")
     fig.colorbar(sc, cax=cax_map, orientation="horizontal", extend="both",
                  label=rf"Retrieved {v['map_name']} (kg/m$^{{2}}$)")
@@ -265,7 +269,7 @@ def plot_collocation(ds, col, title, out_path, args):
     ax.axhspan(1e-2, 2e-1, color="grey", alpha=0.2)
     ax.set_ylabel(rf"{v['name']} [kg m$^{{-2}}$]")
     #ax.set_title(f"Collocation: {coloc_date} UTC")
-    ax.legend()
+    ax.legend(fontsize=12)
     style_time_axis(ax)
     ax.tick_params(labelbottom=False)
 
@@ -295,7 +299,7 @@ def plot_collocation(ds, col, title, out_path, args):
     
     #ax.plot(x, ea, color="C1", ls=":", label="EarthCARE", lw=2)
     ax.set_ylabel(r"(Q99 - Q1)/Mean")
-    ax.legend()
+    ax.legend(fontsize=12)
     style_time_axis(ax)
     ax.tick_params(labelbottom=False)
 
@@ -304,6 +308,15 @@ def plot_collocation(ds, col, title, out_path, args):
     pm = ax.pcolormesh(x_2d.T, col["ea_height"][sel].T / 1e3, wc.T,
                        shading="nearest", norm=LogNorm(vmin=v["wc_vmin"], vmax=v["wc_vmax"]),
                        cmap=v["cmap"])
+
+    # mean mass height (Zm) of AWS and EarthCARE on top of the profiles, in km
+    if v["aws_zm"] is not None:
+        
+        aws_zm = np.where(col["aws_fwp"][sel] < 1e-2, np.nan, col[v["aws_zm"]][sel])
+        ax.plot(x, aws_zm / 1e3, color="C0", lw=2, label=r"AWS Z$_{m}$")
+        ax.plot(x, col[v["ea_zm"]][sel] / 1e3, color="C1", lw=2, label=r"EarthCARE Z$_{m}$")
+        ax.legend(loc="upper right", fontsize=12)
+
     ax.set_ylim(0, 15)
     ax.set_xlabel("AWS scan time")
     ax.set_ylabel("Height [km]")
