@@ -13,6 +13,12 @@ pair in --pairs-file whose AWS file is in --data-dir gets one figure:
 To plot for a single day, the --pattern argument can be used with,
 e.g. *20251205*.nc
 
+The pairs file lists the _v2 AWS files. To plot another version of the same
+granules instead, give --version, e.g. --version v3: each _v2 file in the pairs
+file is replaced by the file with the same name ending in _v3, and the figures
+are saved with a _v3 suffix. A v3 file is only plotted if its _v2 version is
+also in --data-dir; otherwise an error is printed and it is skipped.
+
 Example
 -------
 python batch_plot_collocations.py \
@@ -24,6 +30,11 @@ python batch_plot_collocations.py \
     --pairs-file ../../data/earthcare_aws_file_pairs_2025-12_to_2026-02.pkl \
     --pattern *20251205*.nc \
     --variable lwp
+
+python batch_plot_collocations.py \
+    --data-dir /scratch/may/aws/L2_arctic/2025/12 \
+    --pairs-file ../../data/earthcare_aws_file_pairs_2025-12_to_2026-02.pkl \
+    --version v3
 """
 
 import argparse
@@ -55,6 +66,8 @@ plt.style.use("../../plotstyling.mplstyle")
 
 VAR_LAT = "latitude"
 VAR_LON = "longitude"
+
+PAIRS_VERSION = "v2"   # the AWS file version listed in the pairs files
 
 # what is read and how it is labelled, for each --variable
 #   aws_var       variable in the AWS L2 file, for the map
@@ -93,6 +106,9 @@ MARGINS = {"left": 0.2, "right": 0.3, "top": 1.1, "bottom": 0.7}
 # matches the ..._20251205124638_20251205142250 part of a file name
 DATETIME_PATTERN = re.compile(r"(\d{14})_(\d{14})")
 
+# matches the version at the end of an AWS file name, e.g. the _v2 in ..._v2.nc
+VERSION_PATTERN = re.compile(r"_(v\d+)\.nc$")
+
 
 def format_datetime_range(stem):
     """Turn the timestamps in a file name into a readable title."""
@@ -105,6 +121,11 @@ def format_datetime_range(stem):
     return f"{start:%Y-%m-%d %H:%M} to {end:%H:%M UTC}"
 
 
+def with_version(name, version):
+    """The same AWS file name with its version changed, e.g. ..._v2.nc -> ..._v3.nc."""
+    return VERSION_PATTERN.sub(f"_{version}.nc", name)
+
+
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -112,6 +133,8 @@ def parse_args():
                    help="folder holding the L2 files")
     p.add_argument("--pairs-file", required=True,
                    help="file pairs saved by find_collocations.py")
+    p.add_argument("--version", default=PAIRS_VERSION,
+                   help="AWS file version to plot, e.g. v2 or v3 (default: v2, as in the pairs file)")
     p.add_argument("--variable", choices=sorted(VARIABLES), default="fwp",
                    help="plot AWS FWP against EarthCARE IWP, or AWS LWP against EarthCARE LWP")
     p.add_argument("--pattern", default="l2_arctic_*.nc",
@@ -132,7 +155,10 @@ def parse_args():
                    help="fit the map to each swath instead of using lat-min")
     p.add_argument("--overwrite", action="store_true",
                    help="redo collocations whose figure already exists")
-    return p.parse_args()
+    args = p.parse_args()
+    if not re.fullmatch(r"v\d+", args.version):
+        p.error(f"--version should look like v2 or v3, not {args.version}")
+    return args
 
 
 def nearest_per_scan(col):
@@ -360,20 +386,34 @@ def main():
     print(f"{len(paths)} files match {args.pattern} in {args.data_dir}")
     if not paths:
         return
+    in_data_dir = {os.path.basename(p): p for p in paths}
 
-    # the collocations whose AWS file is one of the matched files
-    aws_by_name = {os.path.basename(p): p for p in paths}
-    pairs = [(aws_by_name[os.path.basename(str(a))], e)
-             for a, e in utils.load_file_pairs(args.pairs_file)
-             if os.path.basename(str(a)) in aws_by_name]
-    print(f"{len(pairs)} collocations in {args.pairs_file} for these files")
+    # the collocations whose AWS file, in the requested version, is one of the matched files.
+    # The pairs file lists the _v2 files; for another version, the same name with that
+    # version is used, but only if the _v2 file is in the data folder too.
+    pairs = []
+    for a, e in utils.load_file_pairs(args.pairs_file):
+        pairs_name = os.path.basename(str(a))
+        name = with_version(pairs_name, args.version)
+        if name not in in_data_dir:
+            continue
+        if args.version != PAIRS_VERSION and pairs_name not in in_data_dir:
+            print(f"error: {name} has no _{PAIRS_VERSION} version ({pairs_name}) "
+                  f"in {args.data_dir}, not plotted")
+            continue
+        pairs.append((in_data_dir[name], e))
+    print(f"{len(pairs)} collocations in {args.pairs_file} for these files "
+          f"(AWS version {args.version})")
+
+    # figures of other versions get the version as a suffix
+    suffix = "" if args.version == PAIRS_VERSION else f"_{args.version}"
 
     t0 = time.time()
     for i, (aws_path, ea_path) in enumerate(pairs, 1):
         stem = os.path.splitext(os.path.basename(aws_path))[0]
         ea_stem = os.path.splitext(os.path.basename(str(ea_path)))[0]
         fig_path = os.path.join(args.fig_dir,
-                                f"{stem}_earthcare_{ea_stem}_{args.variable}.png")
+                                f"{stem}_earthcare_{ea_stem}_{args.variable}{suffix}.png")
 
         if os.path.exists(fig_path) and not args.overwrite:
             print(f"[{i}/{len(pairs)}] {stem}: figure exists, skipping")

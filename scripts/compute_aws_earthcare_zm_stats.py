@@ -1,14 +1,23 @@
 """Comparison of AWS and EarthCARE mean mass height (Zm) within bins.
 Computes 1D histograms of all cases, for AWS Zm vs EarthCARE Zm.
 Plus 2D histogram, i.e. AWS vs EarthCARE for each bin.
+Also the 1D histogram of AWS mean mass diameter (Dm) at the same pixels;
+EarthCARE has no Dm, so there is no EarthCARE counterpart.
 
-AWS Zm is the retrieved fwp_zm. EarthCARE has no Zm, so it is calculated
-from each ice water content profile as the IWC-weighted mean height:
+The collocations are made with utils.colocate_pair_nearest_profile, the same
+function as used for the collocation plots and the water path statistics:
+one AWS pixel per fov, the one closest to the EarthCARE track (within
+max_dist_km), with EarthCARE averaged over all profiles within avg_dist_km
+of that pixel.
+
+AWS Zm is the retrieved fwp_zm_mean. EarthCARE has no Zm, so utils calculates
+it from the ice water content profiles as the IWC-weighted mean height:
 
     zm = sum(z * iwc * dz) / iwp,    with iwp = sum(iwc * dz)
 
 Zm is only meaningful where there is enough ice, so only cases where both
-the AWS FWP and the EarthCARE IWP are at least min_wp are used.
+the AWS FWP and the EarthCARE IWP are at least min_wp are used. Dm is
+filtered on the AWS FWP in the same way.
 
 Reads a list of collocations created by find_collocations.py.
 Mirrors the calling of find_collocations.py, i.e. calling with the argument 2025-07
@@ -24,23 +33,21 @@ python compute_aws_earthcare_zm_stats.py 2025-07:2025-08 2026-06    # ranges and
 import argparse
 import numpy as np
 import pandas as pd
-import xarray as xr
 import pickle
 from pathlib import Path
 
-from utils import load_earthcare
+import utils
 
 # ============================================================
 # CONFIG
 # ============================================================
-footprint_radius_km = 15.0   # Include all EarthCARE obs within this distance from an AWS obs
-min_ec_points = 1           # minimum EarthCARE profiles needed inside the distance
+max_dist_km = 15.0          # largest distance from the AWS pixel to the EarthCARE track
+avg_dist_km = 15.0          # EarthCARE profiles within this distance of the pixel are averaged
+min_ec_points = 1           # minimum EarthCARE profiles needed in that average
 min_wp = 1e-2               # minimum AWS FWP and EarthCARE IWP [kg m-2] for Zm to be used
-km_per_deg = 111.2
+start, end = 0, 400         # AWS scans used from each file
 zm_bins = np.linspace(0, 12000, 61)   # Zm bins [m], 200 m wide
-
-AWS_ZM = "fwp_zm_mean"   # AWS Zm [m]
-AWS_FWP = "fwp_mean"   # AWS FWP, for the min_wp cut
+dm_bins = np.linspace(0, 0.0015, 50)  # Dm bins [m]
 
 data_dir = Path("/home/maye/AWS_Arctic/data")
 
@@ -72,34 +79,6 @@ def parse_months():
     return sorted(set(months)), "_".join(names)
 
 
-def earthcare_zm(ea):
-    """Zm [m] and IWP [kg m-2] of each EarthCARE profile, from the IWC profile.
-
-    zm  = sum(z * iwc * dz) / iwp
-    iwp = sum(iwc * dz)
-
-    z is the height of each grid centre and dz the thickness of each layer.
-    Missing IWC counts as no ice. Profiles without ice get Zm = NaN.
-    """
-    height = ea["height"]    # (profile, level) [m]
-    iwc = ea["iwc"]          # (profile, level) [kg m-3]
-
-    # layer thickness around each grid centre, from the spacing of the centres;
-    # abs() because the heights may run from the top down
-    dz = np.abs(np.gradient(height, axis=1))
-
-    # levels with a missing height, thickness or IWC contribute nothing
-    valid = np.isfinite(height) & np.isfinite(dz) & np.isfinite(iwc)
-    z = np.where(valid, height, 0.0)
-    ice_mass = np.where(valid, iwc * dz, 0.0)   # ice per layer [kg m-2]
-
-    iwp = ice_mass.sum(axis=1)
-    with np.errstate(invalid="ignore", divide="ignore"):
-        zm = (z * ice_mass).sum(axis=1) / iwp
-    zm[iwp <= 0] = np.nan
-    return zm, iwp
-
-
 months, span = parse_months()
 
 pairs_file = data_dir / f"earthcare_aws_file_pairs_{span}.pkl"
@@ -121,91 +100,36 @@ joint_counts = np.zeros((n_bins, n_bins), dtype=np.int64)
 aws_n = 0
 ea_n = 0
 
+# AWS Dm, 1D only
+dm_counts = np.zeros(len(dm_bins) - 1, dtype=np.int64)
+dm_n = 0
+
 # ============================================================
 # PROCESS EACH FILE PAIR
 # ============================================================
 n_pairs = len(file_pairs)
 for k, (aws_filepath, ea_filepath) in enumerate(file_pairs, 1):
     print(f"[{k}/{n_pairs}] {Path(aws_filepath).name}", flush=True)
-    ds = xr.open_dataset(aws_filepath)
-    ea = load_earthcare(ea_filepath)
 
-    start = 0
-    end = 400
-
-    # AWS pixels, flattened to 1D (one entry per pixel)
-    aws_lon = ds.longitude[start:end, :].values.ravel()
-    aws_lat = ds.latitude[start:end, :].values.ravel()
-    aws_zm = ds[AWS_ZM][start:end, :].values.ravel()
-    aws_fwp = ds[AWS_FWP][start:end, :].values.ravel()
-    ds.close()
-
-    # EarthCARE Zm and IWP for every profile
-    ea_zm, ea_iwp = earthcare_zm(ea)
-
-    # restrict EarthCARE to a box containing the AWS swath
-    in_box = (
-        (ea["lon"] >= np.nanmin(aws_lon))
-        & (ea["lon"] <= np.nanmax(aws_lon))
-        & (ea["lat"] >= np.nanmin(aws_lat))
-        & (ea["lat"] <= np.nanmax(aws_lat))
-    )
-    ea_lon_b = ea["lon"][in_box]
-    ea_lat_b = ea["lat"][in_box]
-    ea_zm_b = ea_zm[in_box]
-    ea_iwp_b = ea_iwp[in_box]
-
-    if ea_lon_b.size == 0:
+    try:
+        col = utils.colocate_pair_nearest_profile(
+            aws_filepath, ea_filepath, start=start, end=end,
+            max_dist_km=max_dist_km, avg_dist_km=avg_dist_km,
+        )
+    except Exception as err:      # one bad file should not stop the run
+        print(f"    failed: {type(err).__name__}: {err}")
         continue
 
-    # only check AWS pixels whose latitude is close to the EarthCARE track,
-    # and that have a valid Zm and enough ice
-    lat_margin = footprint_radius_km / km_per_deg
-    candidates = np.flatnonzero(
-        (aws_lat >= np.nanmin(ea_lat_b) - lat_margin)
-        & (aws_lat <= np.nanmax(ea_lat_b) + lat_margin)
-        & np.isfinite(aws_zm)
-        & (aws_fwp >= min_wp)
+    # pairs with enough EarthCARE profiles, enough ice in both, and a valid Zm in both
+    valid = (
+        (col["n_ea_profiles"] >= min_ec_points)
+        & (col["aws_fwp"] >= min_wp)
+        & (col["ea_iwp"] >= min_wp)
+        & np.isfinite(col["aws_zm"])
+        & np.isfinite(col["ea_zm"])
     )
-
-    # loop over AWS pixels: combine all EarthCARE profiles inside the footprint
-    aws_coloc = []
-    ea_coloc = []
-    for j in candidates:
-        # first cut by latitude
-        dlat = ea_lat_b - aws_lat[j]
-        near = np.abs(dlat) * km_per_deg <= footprint_radius_km
-        if not near.any():
-            continue
-
-        # distance in km (wrap longitude around)
-        dlon = ea_lon_b[near] - aws_lon[j]
-        dlon = (dlon + 180.0) % 360.0 - 180.0
-        dx = dlon * np.cos(np.deg2rad(aws_lat[j])) * km_per_deg
-        dy = dlat[near] * km_per_deg
-        inside = np.sqrt(dx * dx + dy * dy) <= footprint_radius_km
-
-        zm = ea_zm_b[near][inside]
-        iwp = ea_iwp_b[near][inside]
-        ok = np.isfinite(iwp)
-        if ok.sum() < min_ec_points:
-            continue
-
-        # mean IWP over the footprint, clear profiles included
-        iwp_mean = iwp[ok].mean()
-        if iwp_mean < min_wp:
-            continue
-
-        # Zm of the footprint: the IWP-weighted mean of the profiles' Zm, which is
-        # the same as the Zm of the footprint's mean IWC profile
-        has_ice = ok & np.isfinite(zm) & (iwp > 0)
-        zm_footprint = np.sum(zm[has_ice] * iwp[has_ice]) / np.sum(iwp[has_ice])
-
-        aws_coloc.append(aws_zm[j])
-        ea_coloc.append(zm_footprint)
-
-    aws_m = np.array(aws_coloc)
-    ea_m = np.array(ea_coloc)
+    aws_m = col["aws_zm"][valid]
+    ea_m = col["ea_zm"][valid]
 
     # 1D histogram counts
     aws_c, _ = np.histogram(aws_m, bins=zm_bins)
@@ -222,9 +146,28 @@ for k, (aws_filepath, ea_filepath) in enumerate(file_pairs, 1):
     aws_n += aws_c.sum()
     ea_n += ea_c.sum()
 
-bin_widths = np.diff(zm_bins)
+    # AWS Dm at the collocated pixels with enough ice according to AWS
+    dm_valid = (
+        (col["n_ea_profiles"] >= min_ec_points)
+        & (col["aws_fwp"] >= min_wp)
+        & np.isfinite(col["aws_dm"])
+    )
+    dm_c, _ = np.histogram(col["aws_dm"][dm_valid], bins=dm_bins)
+    dm_counts += dm_c
+    dm_n += dm_c.sum()
 
-# same layout as the water path statistics, under the key "zm"
+bin_widths = np.diff(zm_bins)
+dm_bin_widths = np.diff(dm_bins)
+
+config = {
+    "max_dist_km": max_dist_km,
+    "avg_dist_km": avg_dist_km,
+    "min_ec_points": min_ec_points,
+    "min_wp": min_wp,
+    "scans": (start, end),
+}
+
+# same layout as the water path statistics, under the keys "zm" and "dm"
 output = {
     "zm": {
         "bins": zm_bins,
@@ -235,15 +178,20 @@ output = {
         "ea_n": ea_n,
         "aws_hist_density": aws_counts / (aws_n * bin_widths),
         "ea_hist_density": ea_counts / (ea_n * bin_widths),
-        "config": {
-            "footprint_radius_km": footprint_radius_km,
-            "min_ec_points": min_ec_points,
-            "min_wp": min_wp,
-        },
-    }
+        "config": config,
+    },
+    # AWS only: there is no EarthCARE Dm
+    "dm": {
+        "bins": dm_bins,
+        "aws_counts": dm_counts,
+        "aws_n": dm_n,
+        "aws_hist_density": dm_counts / (dm_n * dm_bin_widths),
+        "config": config,
+    },
 }
 
-print(f"{aws_n} collocations used")
+print(f"Zm: {aws_n} collocations used")
+print(f"Dm: {dm_n} collocations used")
 
 with open(out_file, "wb") as f:
     pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)

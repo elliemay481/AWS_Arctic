@@ -10,6 +10,7 @@ KM_PER_DEG = 111.2
 EARTH_RADIUS_KM = KM_PER_DEG * 180.0 / np.pi   # consistent with KM_PER_DEG
 
 AWS_ZM_VAR = "fwp_zm_mean"   # AWS mean mass height of the frozen water [m]
+AWS_DM_VAR = "fwp_dm_mean"   # AWS mean mass diameter of the frozen water [m]
 
 AWS_QUANTILE_KEYS = ("fwp_q1", "fwp_q16", "fwp_q84", "fwp_q99",
                      "lwp_q1", "lwp_q16", "lwp_q84", "lwp_q99")
@@ -53,12 +54,10 @@ def load_aws(aws_filepath, start=0, end=400):
             for q in (1, 16, 84, 99):
                 aws[f"{var}_q{q}"] = quantiles.sel(quantile=q / 100, method="nearest").values.ravel()
 
-        # mean mass height; missing from the file -> all NaN, so nothing breaks
-        if AWS_ZM_VAR in ds:
-            aws["zm"] = ds[AWS_ZM_VAR][start:end, :].values.ravel()
-        else:
-            print(f"    warning: {AWS_ZM_VAR} not in {aws_filepath}, AWS Zm set to NaN")
-            aws["zm"] = np.full(aws["lon"].shape, np.nan)
+        aws["zm"] = ds[AWS_ZM_VAR][start:end, :].values.ravel()
+
+        aws["dm"] = ds[AWS_DM_VAR][start:end, :].values.ravel()
+            
     return aws
 
 
@@ -88,6 +87,8 @@ def load_earthcare(ea_filepath):
         "height": np.asarray(sci["height"].values),
         "iwc": np.asarray(sci["ice_water_content"].values),
         "lwc": np.asarray(sci["liquid_water_content"].values),
+        "ice_mass_flux": np.asarray(sci["ice_mass_flux"].values),     # kg m-2 s-1
+        "rwc": np.asarray(sci["rain_water_content"].values),          # kg m-3
     }
     ea_data.close()
 
@@ -168,10 +169,10 @@ def colocate_nearest_profile(aws, ea, max_dist_km=15.0, avg_dist_km=15.0):
     dist_km is the distance from the pixel to its nearest EarthCARE profile.
     """
     out = {key: [] for key in (
-        "lat", "lon", "scan", "fov", "aws_fwp", "ea_iwp",
-        "ea_iwc", "aws_lwp", "ea_lwp", "ea_lwc",
+        "lat", "lon", "scan", "fov", "aws_fwp", "ea_iwp", "ea_iwp_closest",
+        "ea_iwc", "aws_lwp", "ea_lwp", "ea_lwc", "ea_ice_mass_flux", "ea_rwc",
         *(f"aws_{key}" for key in AWS_QUANTILE_KEYS),
-        "aws_zm", "ea_zm",
+        "aws_zm", "ea_zm", "aws_dm",
         "ea_height", "dist_km", "n_ea_profiles",
         "median_distance_to_ea", "mean_distance_to_ea"
     )}
@@ -217,7 +218,10 @@ def colocate_nearest_profile(aws, ea, max_dist_km=15.0, avg_dist_km=15.0):
             closest_ea_idx = ea_samples[np.argmin(sample_dist)]
             out["ea_iwc"].append(ea["iwc"][closest_ea_idx])
             out["ea_lwc"].append(ea["lwc"][closest_ea_idx])
+            out["ea_ice_mass_flux"].append(ea["ice_mass_flux"][closest_ea_idx])
+            out["ea_rwc"].append(ea["rwc"][closest_ea_idx])
             out["ea_height"].append(ea["height"][closest_ea_idx])
+            out["ea_iwp_closest"].append(ea["iwp"][closest_ea_idx])
 
             # other earthcare data, averaged over nearest samples
             iwp = ea["iwp"][ea_samples]
@@ -244,6 +248,7 @@ def colocate_nearest_profile(aws, ea, max_dist_km=15.0, avg_dist_km=15.0):
             out["aws_fwp"].append(aws["fwp"][j])
             out["aws_lwp"].append(aws["lwp"][j])
             out["aws_zm"].append(aws["zm"][j])
+            out["aws_dm"].append(aws["dm"][j])
             for key in AWS_QUANTILE_KEYS:
                 out[f"aws_{key}"].append(aws[key][j])
             out["dist_km"].append(nearest[k])

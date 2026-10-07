@@ -3,6 +3,11 @@ Computes 1D histograms of all cases, for AWS FWP vs EarthCARE IWP and
 AWS LWP vs EarthCARE LWP.
 Plus 2D histogram, i.e. AWS vs EarthCARE for each bin.
 
+The collocations are made with utils.colocate_pair_nearest_profile, the same
+function as used for the collocation plots: one AWS pixel per fov, the one
+closest to the EarthCARE track (within max_dist_km), with EarthCARE averaged
+over all profiles within avg_dist_km of that pixel.
+
 Reads a list of collocations created by find_collocations.py.
 Mirrors the calling of find_collocations.py, i.e. calling with the argument 2025-07
 loads the list of collocations created by calling 'python find_collocations.py 2025-07'
@@ -15,27 +20,26 @@ python compute_aws_earthcare_coloc_stats.py 2025-07:2025-08 2026-06    # ranges 
 """
 
 import argparse
-import sys
 import numpy as np
 import pandas as pd
-import xarray as xr
 import pickle
 from pathlib import Path
 
-from utils import load_earthcare
+import utils
 
 # ============================================================
 # CONFIG
 # ============================================================
-footprint_radius_km = 15.0   # Include all EarthCARE obs within this distance from an AWS obs
-min_ec_points = 1           # minimum EarthCARE points needed inside the distance
-km_per_deg = 111.2
+max_dist_km = 15.0          # largest distance from the AWS pixel to the EarthCARE track
+avg_dist_km = 15.0          # EarthCARE profiles within this distance of the pixel are averaged
+min_ec_points = 1           # minimum EarthCARE profiles needed in that average
+start, end = 0, 400         # AWS scans used from each file
 wp_bins = np.concatenate([[0.0], np.logspace(-4, 2, 100)])   # water path bins, used for FWP and LWP
 
-# for each quantity: the AWS variable, and the EarthCARE key from load_earthcare
+# for each quantity: the AWS and EarthCARE keys returned by utils.colocate_pair_nearest_profile
 QUANTITIES = {
-    "fwp": ("fwp_mean", "iwp"),
-    "lwp": ("lwp_mean", "lwp"),
+    "fwp": ("aws_fwp", "ea_iwp"),
+    "lwp": ("aws_lwp", "ea_lwp"),
 }
 
 data_dir = Path("/home/maye/AWS_Arctic/data")
@@ -100,73 +104,26 @@ stats = {
 n_pairs = len(file_pairs)
 for k, (aws_filepath, ea_filepath) in enumerate(file_pairs, 1):
     print(f"[{k}/{n_pairs}] {Path(aws_filepath).name}", flush=True)
-    ds = xr.open_dataset(aws_filepath)
-    ea = load_earthcare(ea_filepath)
 
-    start = 0
-    end = 400
-
-    # AWS pixels, flattened to 1D (one entry per pixel)
-    aws_lon = ds.longitude[start:end, :].values.ravel()
-    aws_lat = ds.latitude[start:end, :].values.ravel()
-    aws_vals = {q: ds[aws_var][start:end, :].values.ravel()
-                for q, (aws_var, _) in QUANTITIES.items()}
-    ds.close()
-
-    # restrict EarthCARE to a box containing the AWS swath
-    in_box = (
-        (ea["lon"] >= np.nanmin(aws_lon))
-        & (ea["lon"] <= np.nanmax(aws_lon))
-        & (ea["lat"] >= np.nanmin(aws_lat))
-        & (ea["lat"] <= np.nanmax(aws_lat))
-    )
-    ea_lon_b = ea["lon"][in_box]
-    ea_lat_b = ea["lat"][in_box]
-    ea_vals_b = {q: ea[ea_key][in_box] for q, (_, ea_key) in QUANTITIES.items()}
-
-    if ea_lon_b.size == 0:
+    try:
+        col = utils.colocate_pair_nearest_profile(
+            aws_filepath, ea_filepath, start=start, end=end,
+            max_dist_km=max_dist_km, avg_dist_km=avg_dist_km,
+        )
+    except Exception as err:      # one bad file should not stop the run
+        print(f"    failed: {type(err).__name__}: {err}")
         continue
 
-    # only check AWS pixels whose latitude is close to the EarthCARE track,
-    # and that have at least one valid AWS value
-    lat_margin = footprint_radius_km / km_per_deg
-    candidates = np.flatnonzero(
-        (aws_lat >= np.nanmin(ea_lat_b) - lat_margin)
-        & (aws_lat <= np.nanmax(ea_lat_b) + lat_margin)
-        & np.logical_or.reduce([np.isfinite(v) for v in aws_vals.values()])
-    )
+    # enough EarthCARE profiles in the average
+    enough_ec = col["n_ea_profiles"] >= min_ec_points
 
-    # loop over AWS pixels: average all EarthCARE points inside the footprint
-    aws_coloc = {q: [] for q in QUANTITIES}
-    ea_coloc = {q: [] for q in QUANTITIES}
-    for j in candidates:
-        # first cut by latitude
-        dlat = ea_lat_b - aws_lat[j]
-        near = np.abs(dlat) * km_per_deg <= footprint_radius_km
-        if not near.any():
-            continue
+    for q, (aws_key, ea_key) in QUANTITIES.items():
+        s = stats[q]
 
-        # distance in km (wrap longitude around)
-        dlon = ea_lon_b[near] - aws_lon[j]
-        dlon = (dlon + 180.0) % 360.0 - 180.0
-        dx = dlon * np.cos(np.deg2rad(aws_lat[j])) * km_per_deg
-        dy = dlat[near] * km_per_deg
-        inside = np.sqrt(dx * dx + dy * dy) <= footprint_radius_km
-
-        for q in QUANTITIES:
-            if not np.isfinite(aws_vals[q][j]):
-                continue
-            vals = ea_vals_b[q][near][inside]
-            vals = vals[np.isfinite(vals)]
-            if vals.size < min_ec_points:
-                continue
-
-            aws_coloc[q].append(aws_vals[q][j])
-            ea_coloc[q].append(vals.mean())   # zeros included
-
-    for q, s in stats.items():
-        aws_m = np.array(aws_coloc[q])
-        ea_m = np.array(ea_coloc[q])
+        # pairs where both values are valid for this quantity
+        valid = enough_ec & np.isfinite(col[aws_key]) & np.isfinite(col[ea_key])
+        aws_m = col[aws_key][valid]
+        ea_m = col[ea_key][valid]
 
         # 1D histogram counts
         aws_c, _ = np.histogram(aws_m, bins=wp_bins)
@@ -192,9 +149,20 @@ output = {
         **s,
         "aws_hist_density": s["aws_counts"] / (s["aws_n"] * bin_widths),
         "ea_hist_density": s["ea_counts"] / (s["ea_n"] * bin_widths),
+        "config": {
+            "max_dist_km": max_dist_km,
+            "avg_dist_km": avg_dist_km,
+            "min_ec_points": min_ec_points,
+            "scans": (start, end),
+        },
     }
     for q, s in stats.items()
 }
 
+for q, s in stats.items():
+    print(f"{q}: {s['aws_n']} collocations")
+
 with open(out_file, "wb") as f:
     pickle.dump(output, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+print(f"Saved to {out_file}")
