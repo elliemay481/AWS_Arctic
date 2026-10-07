@@ -13,13 +13,22 @@ Mirrors the calling of find_collocations.py, i.e. calling with the argument 2025
 loads the list of collocations created by calling 'python find_collocations.py 2025-07'
 
 To use:
-python compute_aws_earthcare_coloc_stats.py 2025-07                    # one month
+python compute_aws_earthcare_coloc_stats.py 2025-07 --version v3                   # one month
 python compute_aws_earthcare_coloc_stats.py 2025-12:2026-02            # range, both months included
 python compute_aws_earthcare_coloc_stats.py 2025-07 2025-08 2026-06    # separate months
 python compute_aws_earthcare_coloc_stats.py 2025-07:2025-08 2026-06    # ranges and months mixed
+
+The pairs file lists the _v2 AWS files. To use another version of the same
+granules instead, give --version, e.g. --version v3: each _v2 file in the pairs
+file is replaced by the file with the same name ending in _v3, in the same
+folder, and the output is saved with a _v3 suffix. A v3 file is only used if
+its _v2 version exists too; otherwise an error is printed and it is skipped.
+
+python compute_aws_earthcare_coloc_stats.py 2025-12:2026-02 --version v3
 """
 
 import argparse
+import re
 import numpy as np
 import pandas as pd
 import pickle
@@ -44,11 +53,22 @@ QUANTITIES = {
 
 data_dir = Path("/home/maye/AWS_Arctic/data")
 
+PAIRS_VERSION = "v2"   # the AWS file version listed in the pairs files
+
+# matches the version at the end of an AWS file name, e.g. the _v2 in ..._v2.nc
+VERSION_PATTERN = re.compile(r"_(v\d+)\.nc$")
+
+
+def with_version(path, version):
+    """The same AWS file path with its version changed, e.g. ..._v2.nc -> ..._v3.nc."""
+    path = Path(path)
+    return path.with_name(VERSION_PATTERN.sub(f"_{version}.nc", path.name))
+
 # ============================================================
 # COLLOCATION PAIRS
 # ============================================================
 def parse_months():
-    """The months to process, and a name for them to use in file names.
+    """The months to process, a name for them to use in file names, and the AWS version.
 
     Same as in find_collocations.py, so the same arguments give the same file name.
     """
@@ -56,7 +76,11 @@ def parse_months():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("months", nargs="+",
                    help="months as YYYY-MM, or ranges as YYYY-MM:YYYY-MM (both included)")
+    p.add_argument("--version", default=PAIRS_VERSION,
+                   help="AWS file version to use, e.g. v2 or v3 (default: v2, as in the pairs file)")
     args = p.parse_args()
+    if not re.fullmatch(r"v\d+", args.version):
+        p.error(f"--version should look like v2 or v3, not {args.version}")
 
     months, names = [], []
     for item in args.months:
@@ -69,18 +93,38 @@ def parse_months():
             p.error(f"{item}: the end month is before the start month")
         months.extend(rng)
         names.append(f"{rng[0]}" if len(rng) == 1 else f"{rng[0]}_to_{rng[-1]}")
-    return sorted(set(months)), "_".join(names)
+    return sorted(set(months)), "_".join(names), args.version
 
 
-months, span = parse_months()
+months, span, version = parse_months()
+
+# output of other versions gets the version as a suffix
+suffix = "" if version == PAIRS_VERSION else f"_{version}"
 
 pairs_file = data_dir / f"earthcare_aws_file_pairs_{span}.pkl"
-out_file = data_dir / f"aws_earthcare_histograms_{span}.pkl"
+out_file = data_dir / f"aws_earthcare_histograms_{span}{suffix}.pkl"
 
 with open(pairs_file, "rb") as f:
     file_pairs = pickle.load(f)
 
 print(f"{len(file_pairs)} file pairs")
+
+# the pairs file lists the _v2 files; for another version, use the file with the same
+# name in that version, but only if the _v2 file exists too
+if version != PAIRS_VERSION:
+    swapped = []
+    for aws_filepath, ea_filepath in file_pairs:
+        new_path = with_version(aws_filepath, version)
+        if not Path(aws_filepath).exists():
+            print(f"error: {new_path.name} has no _{PAIRS_VERSION} version "
+                  f"({Path(aws_filepath).name}), not used")
+            continue
+        if not new_path.exists():
+            print(f"    no {version} file {new_path.name}, skipping")
+            continue
+        swapped.append((new_path, ea_filepath))
+    file_pairs = swapped
+    print(f"{len(file_pairs)} file pairs with AWS version {version}")
 
 # ============================================================
 # STATS
@@ -154,6 +198,7 @@ output = {
             "avg_dist_km": avg_dist_km,
             "min_ec_points": min_ec_points,
             "scans": (start, end),
+            "aws_version": version,
         },
     }
     for q, s in stats.items()
