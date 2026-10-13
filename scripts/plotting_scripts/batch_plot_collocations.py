@@ -45,6 +45,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+import fnmatch
  
 import numpy as np
 import xarray as xr
@@ -323,6 +324,16 @@ def plot_collocation(ds, col, title, out_path, args):
         width = (q99 - q1) / aws
         ax.fill_between(x, 0, width, where=aws > 1e-3,
                     color="C0", alpha=0.2, lw=0, label="AWS Unc.")
+
+    """
+    # the 3 smallest relative widths among the plotted points (AWS mean > 1e-3)
+    shown = np.flatnonzero((aws > 1e-3) & np.isfinite(width))
+    lowest = shown[np.argsort(width[shown])[:3]]
+    print(f"    3 lowest (Q99 - Q1)/mean of {shown.size} plotted points:")
+    for n in lowest:
+        print(f"      {np.datetime_as_string(col['scan'][sel][n], unit='s')}"
+              f"  width {width[n]:.3g}  Q1 {q1[n]:.3g}  Q99 {q99[n]:.3g}  mean {aws[n]:.3g}")
+    """
     
     #ax.plot(x, ea, color="C1", ls=":", label="EarthCARE", lw=2)
     ax.set_ylabel(r"(Q99 - Q1)/Mean")
@@ -331,6 +342,7 @@ def plot_collocation(ds, col, title, out_path, args):
     ax.tick_params(labelbottom=False)
     
     # ---- collocation quality flags, on a second y-axis ----
+    """
     flag_labels = {
         "median_distance_to_ea": "Median distance to EC [km]",
         "mean_distance_to_ea": "Mean distance to EC [km]",
@@ -348,7 +360,8 @@ def plot_collocation(ds, col, title, out_path, args):
     handles, labels = ax.get_legend_handles_labels()
     flag_handles, flag_labels_used = ax_flags.get_legend_handles_labels()
     ax.legend(handles + flag_handles, labels + flag_labels_used, fontsize=10, loc="upper left")
-
+    """
+    
     # ---- EarthCARE IWC ----
     ax = ax_iwc
     pm = ax.pcolormesh(x_2d.T, col["ea_height"][sel].T / 1e3, wc.T,
@@ -383,6 +396,7 @@ def main():
     v = VARIABLES[args.variable]
 
     paths = sorted(glob.glob(os.path.join(args.data_dir, args.pattern)))
+    print(paths)
     print(f"{len(paths)} files match {args.pattern} in {args.data_dir}")
     if not paths:
         return
@@ -391,8 +405,17 @@ def main():
     # the collocations whose AWS file, in the requested version, is one of the matched files.
     # The pairs file lists the _v2 files; for another version, the same name with that
     # version is used, but only if the _v2 file is in the data folder too.
+    
+    all_pairs = utils.load_file_pairs(args.pairs_file)
+
+    # the pairs in the pairs file whose AWS file matches --pattern, any version
+    print(f"pairs in {args.pairs_file} matching {args.pattern}:")
+    for a, e in all_pairs:
+        if fnmatch.fnmatch(os.path.basename(str(a)), args.pattern):
+            print(f"  {a}\n    {e}")
+
     pairs = []
-    for a, e in utils.load_file_pairs(args.pairs_file):
+    for a, e in all_pairs:
         pairs_name = os.path.basename(str(a))
         name = with_version(pairs_name, args.version)
         if name not in in_data_dir:

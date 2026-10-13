@@ -85,7 +85,7 @@ def index_aws_files(months):
     index = []
     for period in sorted(set(months) | {m - 1 for m in months}):
         folder = AWS_ROOT / f"{period.year:04d}" / f"{period.month:02d}"
-        for f in sorted(folder.rglob("l2_arctic_*_v2.nc")):
+        for f in sorted(folder.rglob("l2_arctic_*_v3.nc")):
             try:
                 start, end = (pd.to_datetime(t, format="%Y%m%d%H%M%S")
                               for t in f.stem.split("_")[2:4])
