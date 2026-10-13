@@ -294,7 +294,7 @@ def plot_collocation(ds, col, title, out_path, args):
     ax.plot(x, ea, color="C1", label="EarthCARE", lw=2)
     ax.set_yscale("log")
     ax.set_ylim([1e-2, 1e2])
-    ax.axhspan(1e-2, 2e-1, color="grey", alpha=0.2)
+    ax.axhspan(1e-2, 5e-2, color="grey", alpha=0.2)
     ax.set_ylabel(rf"{v['name']} [kg m$^{{-2}}$]")
     #ax.set_title(f"Collocation: {coloc_date} UTC")
     ax.legend(fontsize=12)
